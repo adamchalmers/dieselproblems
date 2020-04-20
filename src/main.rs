@@ -26,9 +26,32 @@ struct Tunnel {
     active: bool,
 }
 
+// Filters that might be applied to find a tunnel
+pub struct Filter {
+    name: Name,
+    active: bool,
+}
+
 enum Name {
     Adam,
     Brian,
+}
+
+impl Filter {
+    // The `Filter` type can be mapped 1:1 onto sets of Diesel filter predicates.
+    // The predicates can be applied to either updates or selects!
+    fn as_diesel(&self) -> Vec<Box<dyn BoxableExpression<tunnels::table, Pg, SqlType = Bool>>> {
+        let f0 = match self.name {
+            Name::Adam => tunnels::name.eq("adam"),
+            Name::Brian => tunnels::name.eq("brian"),
+        };
+        let f1 = if self.active {
+            tunnels::active.eq(true)
+        } else {
+            tunnels::active.eq(false)
+        };
+        vec![Box::new(f0), Box::new(f1)]
+    }
 }
 
 fn main() {
@@ -37,22 +60,22 @@ fn main() {
     let pool = Pool::builder().build(manager).unwrap();
     let conn = pool.get().unwrap();
 
-    // Update some rows
-    let _update_query = diesel::update(tunnels::table)
-        .filter(find_user(Name::Adam))
-        .set(tunnels::active.eq(false))
-        .execute(&conn);
+    let filter = Filter {
+        name: Name::Adam,
+        active: false,
+    };
 
-    // Query some rows
-    let _select_query: Vec<Tunnel> = tunnels::table
-        .filter(find_user(Name::Brian))
-        .get_results(&conn)
-        .unwrap();
-}
-
-fn find_user(name: Name) -> Box<dyn BoxableExpression<tunnels::table, Pg, SqlType = Bool>> {
-    match name {
-        Name::Adam => Box::new(tunnels::name.eq("adam")),
-        Name::Brian => Box::new(tunnels::name.eq("brian")),
+    // Update some rows, applying filters
+    let mut update_query = diesel::update(tunnels::table).into_boxed();
+    for f in filter.as_diesel() {
+        update_query = update_query.filter(f);
     }
+    let _deleted_tunnels = update_query.set(tunnels::active.eq(false)).execute(&conn);
+
+    // Query some rows, applying filters
+    let mut q = tunnels::table.into_boxed();
+    for f in filter.as_diesel() {
+        q = q.filter(f);
+    }
+    let _tunnels: Vec<Tunnel> = q.get_results(&conn).unwrap();
 }
