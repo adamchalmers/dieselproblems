@@ -1,15 +1,16 @@
 #[macro_use]
 extern crate diesel;
 use diesel::{
+    expression::BoxableExpression,
     pg::{Pg, PgConnection},
     query_dsl::{QueryDsl, RunQueryDsl},
     r2d2::{ConnectionManager, Pool},
+    sql_types::Bool,
     ExpressionMethods,
 };
 
 // Declare the SQL table
 table! {
-    use diesel::sql_types::*;
     tunnels (id) {
         id -> BigInt,
         name -> Text,
@@ -37,21 +38,21 @@ fn main() {
     let conn = pool.get().unwrap();
 
     // Update some rows
-    let tunnels_to_update = get_tunnels(Name::Adam);
-    diesel::update(tunnels_to_update)
-        //         ^^^^^^^^^^^^^^^^^ the trait `diesel::Identifiable` is not implemented for
-        // `diesel::query_builder::BoxedSelectStatement<'_, (diesel::sql_types::BigInt,
-        // diesel::sql_types::Text, diesel::sql_types::Bool), tunnels::table, diesel::pg::Pg>`
-        .set(tunnels::active.eq(true))
+    let _update_query = diesel::update(tunnels::table)
+        .filter(find_user(Name::Adam))
+        .set(tunnels::active.eq(false))
         .execute(&conn);
+
+    // Query some rows
+    let _select_query: Vec<Tunnel> = tunnels::table
+        .filter(find_user(Name::Brian))
+        .get_results(&conn)
+        .unwrap();
 }
 
-// Queries all tunnels that meet a filter based on name.
-fn get_tunnels<'a>(name: Name) -> tunnels::BoxedQuery<'a, Pg> {
-    let mut query = tunnels::table.select(tunnels::all_columns).into_boxed();
+fn find_user(name: Name) -> Box<dyn BoxableExpression<tunnels::table, Pg, SqlType = Bool>> {
     match name {
-        Name::Adam => query = query.filter(tunnels::name.eq("adam")),
-        Name::Brian => query = query.filter(tunnels::name.eq("brian")),
+        Name::Adam => Box::new(tunnels::name.eq("adam")),
+        Name::Brian => Box::new(tunnels::name.eq("brian")),
     }
-    query
 }
